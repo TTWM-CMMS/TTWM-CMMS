@@ -1221,6 +1221,8 @@
         { title: 'إصدار وإغلاق أمر شغل الصيانة الدورية على نظام SAP', specialty: 'SAP', minutes: 15 }
       ];
 
+      var DEFAULT_TELEGRAM_TOKEN = '9261684067:AAE4-I_JWwMYXGIdYCzsHOMYE5MsIirkomU';
+
       var state = {
         machines: [],
         techs: [],
@@ -1230,8 +1232,8 @@
         patrol: [],
         telegram: { 
           enabled: true, 
-          botToken: '9261684067:AAE4-I_JWwMYXGIdYCzsHOMYE5MsIirkomU', 
-          recipients: [ { chatId: '-1001234567890', label: 'جروب الصيانة' } ] 
+          botToken: DEFAULT_TELEGRAM_TOKEN, 
+          recipients: [] 
         },
         firebase: { projectId: 'ttwm-maint-cmms', apiKey: 'AIzaSyCzczL08nAXzLSJzY7QRx0aTjiyM7ItyXM', connected: true },
         pmLine: 'ALL',
@@ -1369,8 +1371,8 @@
           var tg = JSON.parse(localStorage.getItem(STORE_KEYS.TELEGRAM) || 'null');
           if (tg && tg.botToken) {
             state.telegram = tg;
-            if (!state.telegram.recipients || !state.telegram.recipients.length) {
-              state.telegram.recipients = [ { chatId: '-1001234567890', label: 'جروب الصيانة' } ];
+            if (!Array.isArray(state.telegram.recipients)) {
+              state.telegram.recipients = [];
             }
           }
 
@@ -1384,6 +1386,39 @@
           state.logs = [];
           state.patrol = [];
         }
+      }
+
+      // Auto-discover Telegram Chat IDs from getUpdates and save to state & cloud
+      function autoDiscoverTelegramChats(silent) {
+        var tok = cleanStr(state.telegram.botToken || DEFAULT_TELEGRAM_TOKEN);
+        if (!tok) return Promise.resolve(false);
+        return fetch('https://api.telegram.org/bot' + tok + '/getUpdates?limit=50')
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (!d || !d.ok || !Array.isArray(d.result)) return false;
+            var added = false;
+            d.result.forEach(function(u) {
+              var c = (u.message && u.message.chat) ||
+                      (u.my_chat_member && u.my_chat_member.chat) ||
+                      (u.channel_post && u.channel_post.chat);
+              if (c && c.id) {
+                var cid = String(c.id);
+                var lbl = c.title || c.first_name || ('جروب (' + cid + ')');
+                if (!state.telegram.recipients.some(function(r) { return String(r.chatId) === cid; })) {
+                  state.telegram.recipients.push({ chatId: cid, label: lbl });
+                  added = true;
+                }
+              }
+            });
+            if (added) {
+              saveAll();
+              syncAllToCloud(true);
+              renderSettings();
+              if (!silent) toast('تم اكتشاف وحفظ الجروبات تلقائياً على السحابة ✅', 'success');
+            }
+            return added;
+          })
+          .catch(function() { return false; });
       }
 
       function getSortedLines() {
@@ -1458,8 +1493,8 @@
       }
 
       function pullAllFromCloud(silent) {
-        if (!state.firebase.projectId || !state.firebase.apiKey) return;
-        Promise.all([
+        if (!state.firebase.projectId || !state.firebase.apiKey) return Promise.resolve();
+        return Promise.all([
           fbPullDoc('logs'),
           fbPullDoc('patrol'),
           fbPullDoc('lists'),
@@ -1475,10 +1510,22 @@
           }
           if (arr[3] && arr[3].botToken) {
             state.telegram = arr[3];
+            if (!Array.isArray(state.telegram.recipients)) {
+              state.telegram.recipients = [];
+            }
           }
+          // Filter out dummy placeholder ID if real ones exist or if it was never valid
+          state.telegram.recipients = state.telegram.recipients.filter(function(r) {
+            return String(r.chatId) !== '-1001234567890';
+          });
           saveAll();
           renderAllCurrent();
           if (!silent) toast('تم تحديث البيانات من Firebase 🔄', 'success');
+
+          // If still no recipients saved in cloud, auto-discover from Telegram API immediately
+          if (state.telegram.recipients.length === 0) {
+            return autoDiscoverTelegramChats(true);
+          }
         });
       }
 
@@ -1780,38 +1827,46 @@
       }
 
       function sendTelegramPayload(msgText, photosArr) {
-        var tok = cleanStr(state.telegram.botToken);
-        if (!state.telegram.enabled || !tok || !state.telegram.recipients.length) return Promise.resolve();
-        var photos = Array.isArray(photosArr) ? photosArr : [];
+        var tok = cleanStr(state.telegram.botToken || DEFAULT_TELEGRAM_TOKEN);
+        if (!state.telegram.enabled || !tok) return Promise.resolve();
 
-        var tasks = state.telegram.recipients.map(function(r) {
-          var sendTxtPromise = fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: r.chatId, text: msgText, parse_mode: 'Markdown' })
-          }).catch(function() {
-            return fetch('https://api.telegram.org/bot' + tok + '/sendMessage?chat_id=' + encodeURIComponent(r.chatId) + '&text=' + encodeURIComponent(msgText), { mode: 'no-cors' }).catch(function() {});
-          });
+        var ensureRecipients = state.telegram.recipients.length > 0
+          ? Promise.resolve()
+          : autoDiscoverTelegramChats(true);
 
-          if (!photos.length) return sendTxtPromise;
+        return ensureRecipients.then(function() {
+          if (!state.telegram.recipients.length) return Promise.resolve();
+          var photos = Array.isArray(photosArr) ? photosArr : [];
 
-          return sendTxtPromise.then(function() {
-            var photoPromises = photos.map(function(dataUrl, idx) {
-              var blob = dataURLtoBlob(dataUrl);
-              if (!blob) return Promise.resolve();
-              var fd = new FormData();
-              fd.append('chat_id', r.chatId);
-              fd.append('photo', blob, 'photo_' + (idx + 1) + '.jpg');
-              fd.append('caption', '📷 صورة مرفقة #' + (idx + 1));
-              return fetch('https://api.telegram.org/bot' + tok + '/sendPhoto', {
-                method: 'POST',
-                body: fd
-              }).catch(function() {});
+          var tasks = state.telegram.recipients.map(function(r) {
+            var sendTxtPromise = fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: r.chatId, text: msgText, parse_mode: 'Markdown' })
+            }).catch(function() {
+              return fetch('https://api.telegram.org/bot' + tok + '/sendMessage?chat_id=' + encodeURIComponent(r.chatId) + '&text=' + encodeURIComponent(msgText), { mode: 'no-cors' }).catch(function() {});
             });
-            return Promise.all(photoPromises);
+
+            if (!photos.length) return sendTxtPromise;
+
+            return sendTxtPromise.then(function() {
+              var photoPromises = photos.map(function(dataUrl, idx) {
+                var blob = dataURLtoBlob(dataUrl);
+                if (!blob) return Promise.resolve();
+                var fd = new FormData();
+                fd.append('chat_id', r.chatId);
+                fd.append('photo', blob, 'photo_' + (idx + 1) + '.jpg');
+                fd.append('caption', '📷 صورة مرفقة #' + (idx + 1));
+                return fetch('https://api.telegram.org/bot' + tok + '/sendPhoto', {
+                  method: 'POST',
+                  body: fd
+                }).catch(function() {});
+              });
+              return Promise.all(photoPromises);
+            });
           });
+          return Promise.all(tasks);
         });
-        return Promise.all(tasks);
       }
 
       function sendTelegramAlert(issue) {
@@ -2023,7 +2078,7 @@
         document.getElementById('tg-rec-cnt').textContent = state.telegram.recipients.length;
 
         document.getElementById('tg-rec-list').innerHTML = state.telegram.recipients.length === 0
-          ? '<div class="muted" style="padding:10px; border:1px dashed var(--border-strong); border-radius:10px; text-align:center;">لا يوجد مستلمين مسجلين</div>'
+          ? '<div class="muted" style="padding:10px; border:1px dashed var(--border-strong); border-radius:10px; text-align:center;">جاري مزامنة الجروبات تلقائياً أو اضغط «جلب Chat ID تلقائياً»</div>'
           : state.telegram.recipients.map(function(r, i) {
               return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--bg-card); border-radius:10px; margin-bottom:6px; font-size:12px; border:1px solid var(--border-color);">' +
                 '<div><strong>✈️ ' + esc(r.label) + '</strong> <span dir="ltr" style="font-family:monospace; color:var(--blue-text);">(' + esc(r.chatId) + ')</span></div>' +
@@ -2281,18 +2336,35 @@
             var tok = cleanStr(document.getElementById('tg-token-inp').value);
             state.telegram.botToken = tok; saveAll();
             var fBtn = document.getElementById('tg-fetch-btn');
-            fBtn.disabled = true; fBtn.textContent = '⏳ جاري الجلب...';
-            fetch('https://api.telegram.org/bot' + tok + '/getUpdates?limit=30')
+            fBtn.disabled = true; fBtn.textContent = '⏳ جاري الجلب والحفظ...';
+            fetch('https://api.telegram.org/bot' + tok + '/getUpdates?limit=50')
               .then(function(r) { return r.json(); })
               .then(function(d) {
                 var panel = document.getElementById('tg-found-panel');
                 var listEl = document.getElementById('tg-found-list');
                 panel.classList.remove('hidden');
                 var chats = {};
+                var autoAddedCount = 0;
                 (d.result || []).forEach(function(u) {
-                  var c = (u.message && u.message.chat) || (u.my_chat_member && u.my_chat_member.chat);
-                  if (c && c.id) chats[String(c.id)] = c.title || c.first_name || ('Chat ' + c.id);
+                  var c = (u.message && u.message.chat) ||
+                          (u.my_chat_member && u.my_chat_member.chat) ||
+                          (u.channel_post && u.channel_post.chat);
+                  if (c && c.id) {
+                    var cidStr = String(c.id);
+                    var lblStr = c.title || c.first_name || ('Chat ' + c.id);
+                    chats[cidStr] = lblStr;
+                    if (!state.telegram.recipients.some(function(r) { return String(r.chatId) === cidStr; })) {
+                      state.telegram.recipients.push({ chatId: cidStr, label: lblStr });
+                      autoAddedCount++;
+                    }
+                  }
                 });
+                if (autoAddedCount > 0) {
+                  saveAll();
+                  syncAllToCloud(true);
+                  renderSettings();
+                  toast('تم جلب وإضافة ' + autoAddedCount + ' جروب وحفظهم على السحابة تلقائياً ✅', 'success');
+                }
                 var keys = Object.keys(chats);
                 listEl.innerHTML = keys.length === 0
                   ? '<div class="muted">أرسل أي رسالة في الجروب بعد إضافة البوت كـ Admin ثم أعد المحاولة.</div>'
@@ -2637,6 +2709,8 @@
 
           if (state.firebase.connected) {
             pullAllFromCloud(true);
+          } else if (state.telegram.recipients.length === 0) {
+            autoDiscoverTelegramChats(true);
           }
         } catch (err) {
           console.error(err);
