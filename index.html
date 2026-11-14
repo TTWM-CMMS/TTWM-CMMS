@@ -893,7 +893,7 @@
         </div>
       </div>
 
-      <!-- Section A: سجل تقارير الصيانة الدورية (Machine & Date Filters ONLY) -->
+      <!-- Section A: سجل تقارير الصيانة الدورية -->
       <div class="card">
         <div class="card-header">
           <div>
@@ -1450,7 +1450,8 @@
         Promise.all([
           fbPushDoc('logs', state.logs),
           fbPushDoc('patrol', state.patrol),
-          fbPushDoc('lists', { machines: state.machines, techs: state.techs, sups: state.sups, tasks: state.tasks })
+          fbPushDoc('lists', { machines: state.machines, techs: state.techs, sups: state.sups, tasks: state.tasks }),
+          fbPushDoc('telegram', state.telegram)
         ]).then(function(res) {
           if (!silent) toast(res[0] ? 'تمت مزامنة جميع البيانات مع Firebase ☁️' : 'تعذر الرفع للسحابة', res[0] ? 'success' : 'error');
         });
@@ -1461,7 +1462,8 @@
         Promise.all([
           fbPullDoc('logs'),
           fbPullDoc('patrol'),
-          fbPullDoc('lists')
+          fbPullDoc('lists'),
+          fbPullDoc('telegram')
         ]).then(function(arr) {
           if (Array.isArray(arr[0])) state.logs = arr[0];
           if (Array.isArray(arr[1])) state.patrol = arr[1];
@@ -1470,6 +1472,9 @@
             if (Array.isArray(arr[2].techs) && arr[2].techs.length) state.techs = arr[2].techs;
             if (Array.isArray(arr[2].sups) && arr[2].sups.length) state.sups = arr[2].sups;
             if (Array.isArray(arr[2].tasks) && arr[2].tasks.length) state.tasks = arr[2].tasks;
+          }
+          if (arr[3] && arr[3].botToken) {
+            state.telegram = arr[3];
           }
           saveAll();
           renderAllCurrent();
@@ -2270,8 +2275,8 @@
           } else if (act === 'tg-save') {
             state.telegram.botToken = cleanStr(document.getElementById('tg-token-inp').value);
             state.telegram.enabled = document.getElementById('tg-enabled-chk').checked;
-            saveAll(); renderSettings();
-            toast('تم حفظ إعدادات تليجرام ✅', 'success');
+            saveAll(); syncAllToCloud(true); renderSettings();
+            toast('تم حفظ إعدادات تليجرام ومزامنتها على السحابة ✅', 'success');
           } else if (act === 'tg-fetch') {
             var tok = cleanStr(document.getElementById('tg-token-inp').value);
             state.telegram.botToken = tok; saveAll();
@@ -2309,8 +2314,8 @@
             var lbl = actBtn.getAttribute('data-lbl');
             if (!state.telegram.recipients.some(function(r) { return r.chatId === cid; })) {
               state.telegram.recipients.push({ chatId: cid, label: lbl });
-              saveAll(); renderSettings();
-              toast('تمت إضافة ' + lbl, 'success');
+              saveAll(); syncAllToCloud(true); renderSettings();
+              toast('تمت إضافة ' + lbl + ' ومزامنته سحابياً', 'success');
             }
           } else if (act === 'tg-add-rec') {
             var cid2 = cleanStr(document.getElementById('tg-cid-inp').value);
@@ -2319,11 +2324,11 @@
             state.telegram.recipients.push({ chatId: cid2, label: lbl2 });
             document.getElementById('tg-cid-inp').value = '';
             document.getElementById('tg-lbl-inp').value = '';
-            saveAll(); renderSettings();
-            toast('تمت إضافة المستلم', 'success');
-          } else id (act === 'tg-del-rec') {
+            saveAll(); syncAllToCloud(true); renderSettings();
+            toast('تمت إضافة المستلم ومزامنته سحابياً', 'success');
+          } else if (act === 'tg-del-rec') {
             state.telegram.recipients.splice(Number(actBtn.getAttribute('data-idx')), 1);
-            saveAll(); renderSettings();
+            saveAll(); syncAllToCloud(true); renderSettings();
           } else if (act === 'tg-test') {
             var tok2 = cleanStr(document.getElementById('tg-token-inp').value);
             if (!tok2 || !state.telegram.recipients.length) { toast('أضف مستلم واحد على الأقل أولاً', 'error'); return; }
@@ -2359,7 +2364,7 @@
           } else if (act === 'del-s') {
             state.sups.splice(Number(actBtn.getAttribute('data-idx')), 1); saveAll(); syncAllToCloud(true); renderSettings();
           } else if (act === 'del-tk') {
-            state.tasks.splice(Number(actBtn.getAttribute('data-idx']), 1); saveAll(); syncAllToCloud(true); renderSettings();
+            state.tasks.splice(Number(actBtn.getAttribute('data-idx')), 1); saveAll(); syncAllToCloud(true); renderSettings();
           }
         });
 
@@ -2453,7 +2458,7 @@
               });
               if (arr.length) { state.sups = arr; saveAll(); syncAllToCloud(true); renderAllCurrent(); toast('تم استيراد ' + arr.length + ' مشرف', 'success'); }
             });
-          } else id (e.target.id === 'imp-tasks' && e.target.files[0]) {
+          } else if (e.target.id === 'imp-tasks' && e.target.files[0]) {
             parseCSVFile(e.target.files[0], function(rows) {
               var arr = [];
               rows.forEach(function(r, i) {
@@ -2541,7 +2546,7 @@
           sendTelegramPmReport(newPmLog);
 
           e.target.reset();
-          document.getElementById('pm-date-inp.value = todayISO();
+          document.getElementById('pm-date-inp').value = todayISO();
           document.getElementById('pm-machine-val').value = '';
           document.getElementById('pm-selected-box').classList.add('hidden');
           document.getElementById('pm-procs-container').innerHTML = '';
@@ -2621,7 +2626,7 @@
             }
           } catch (e) {}
 
-          document.getElementById('today-date-lbl').textContent = new Date().toLocaleDateString('ar-EG',شف { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          document.getElementById('today-date-lbl').textContent = new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
           document.getElementById('pm-date-inp').value = todayISO();
 
           updateFirebaseBadge();
