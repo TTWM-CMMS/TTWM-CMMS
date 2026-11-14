@@ -1311,8 +1311,8 @@
         tasks: [],
         logs: [],
         patrol: [],
-        telegram: { enabled: true, botToken: '9261684067:AAE4-I_JWwMYXGIdYCzsHOMYE5MsIirkomU', recipients: [] },
-        firebase: { projectId: '', apiKey: '', connected: false },
+        telegram: { enabled: true, botToken: '9261684067:AAE4-I_JWwMYXGIdYCzsHOMYE5MsIirkomU', recipients: [ { chatId: '-1001234567890', label: 'جروب الصيانة' } ] },
+        firebase: { projectId: 'ttwm-maint-cmms', apiKey: 'AIzaSyCzczL08nAXzLSJzY7QRx0aTjiyM7ItyXM', connected: true },
         pmLine: 'ALL',
         ptLine: 'ALL',
         rowTechs: {},
@@ -1441,23 +1441,23 @@
           state.tasks = Array.isArray(tk) && tk.length ? tk : DEFAULT_TASKS.slice();
 
           var lg = JSON.parse(localStorage.getItem(STORE_KEYS.LOGS) || 'null');
-          state.logs = Array.isArray(lg) ? lg : DEFAULT_LOGS.slice();
+          state.logs = Array.isArray(lg) ? lg : [];
 
           var pt = JSON.parse(localStorage.getItem(STORE_KEYS.PATROL) || 'null');
-          state.patrol = Array.isArray(pt) ? pt : DEFAULT_PATROL.slice();
+          state.patrol = Array.isArray(pt) ? pt : [];
 
           var tg = JSON.parse(localStorage.getItem(STORE_KEYS.TELEGRAM) || 'null');
-          if (tg) state.telegram = tg;
+          if (tg && tg.recipients && tg.recipients.length > 0) state.telegram = tg;
 
           var fb = JSON.parse(localStorage.getItem(STORE_KEYS.FIREBASE) || 'null');
-          if (fb) state.firebase = fb;
+          if (fb && fb.projectId && fb.apiKey) state.firebase = fb;
         } catch (e) {
           state.machines = DEFAULT_MACHINES.slice();
           state.techs = DEFAULT_TECHS.slice();
           state.sups = DEFAULT_SUPS.slice();
           state.tasks = DEFAULT_TASKS.slice();
-          state.logs = DEFAULT_LOGS.slice();
-          state.patrol = DEFAULT_PATROL.slice();
+          state.logs = [];
+          state.patrol = [];
         }
       }
 
