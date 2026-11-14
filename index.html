@@ -2321,7 +2321,7 @@
             document.getElementById('tg-lbl-inp').value = '';
             saveAll(); renderSettings();
             toast('تمت إضافة المستلم', 'success');
-          } else if (act === 'tg-del-rec') {
+          } else id (act === 'tg-del-rec') {
             state.telegram.recipients.splice(Number(actBtn.getAttribute('data-idx')), 1);
             saveAll(); renderSettings();
           } else if (act === 'tg-test') {
@@ -2359,7 +2359,7 @@
           } else if (act === 'del-s') {
             state.sups.splice(Number(actBtn.getAttribute('data-idx')), 1); saveAll(); syncAllToCloud(true); renderSettings();
           } else if (act === 'del-tk') {
-            state.tasks.splice(Number(actBtn.getAttribute('data-idx')), 1); saveAll(); syncAllToCloud(true); renderSettings();
+            state.tasks.splice(Number(actBtn.getAttribute('data-idx']), 1); saveAll(); syncAllToCloud(true); renderSettings();
           }
         });
 
@@ -2453,7 +2453,7 @@
               });
               if (arr.length) { state.sups = arr; saveAll(); syncAllToCloud(true); renderAllCurrent(); toast('تم استيراد ' + arr.length + ' مشرف', 'success'); }
             });
-          } else if (e.target.id === 'imp-tasks' && e.target.files[0]) {
+          } else id (e.target.id === 'imp-tasks' && e.target.files[0]) {
             parseCSVFile(e.target.files[0], function(rows) {
               var arr = [];
               rows.forEach(function(r, i) {
@@ -2541,7 +2541,7 @@
           sendTelegramPmReport(newPmLog);
 
           e.target.reset();
-          document.getElementById('pm-date-inp').value = todayISO();
+          document.getElementById('pm-date-inp.value = todayISO();
           document.getElementById('pm-machine-val').value = '';
           document.getElementById('pm-selected-box').classList.add('hidden');
           document.getElementById('pm-procs-container').innerHTML = '';
@@ -2621,7 +2621,7 @@
             }
           } catch (e) {}
 
-          document.getElementById('today-date-lbl').textContent = new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          document.getElementById('today-date-lbl').textContent = new Date().toLocaleDateString('ar-EG',شف { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
           document.getElementById('pm-date-inp').value = todayISO();
 
           updateFirebaseBadge();
