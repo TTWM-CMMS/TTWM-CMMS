@@ -1613,9 +1613,25 @@
         renderAllCurrent();
       }
 
+      function refreshAllProcRows() {
+        var taskOptions = '<option value="">-- اختر بند صيانة جاهز أو اكتب بالأسفل --</option>' + state.tasks.map(function(tk) {
+          return '<option value="' + esc(tk.title) + '" data-mins="' + tk.minutes + '">[' + esc(tk.specialty) + '] ' + esc(tk.title) + ' (' + tk.minutes + ' د)</option>';
+        }).join('');
+        document.querySelectorAll('.proc-card').forEach(function(row) {
+          updateProcTechs(row.id);
+          var pSel = row.querySelector('.p-preset');
+          if (pSel) {
+            var prevVal = pSel.value;
+            pSel.innerHTML = taskOptions;
+            if (prevVal) pSel.value = prevVal;
+          }
+        });
+      }
+
       function renderAllCurrent() {
         renderPmMachines();
         renderPmSups();
+        refreshAllProcRows();
         renderPatrolFormHelpers();
         renderDashboard();
         renderSettings();
@@ -1824,27 +1840,82 @@
         }).join('');
       }
 
-      // --- Multi-Fallback Telegram Sender ---
-      function sendTelegramAlert(issue) {
+      function dataURLtoBlob(dataurl) {
+        try {
+          var arr = dataurl.split(',');
+          var mimeMatch = arr[0].match(/:(.*?);/);
+          var mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+          var bstr = atob(arr[1]);
+          var n = bstr.length;
+          var u8arr = new Uint8Array(n);
+          while (n--) { u8arr[n] = bstr.charCodeAt(n); }
+          return new Blob([u8arr], { type: mime });
+        } catch (e) { return null; }
+      }
+
+      function sendTelegramPayload(msgText, photosArr) {
         var tok = cleanStr(state.telegram.botToken);
         if (!state.telegram.enabled || !tok || !state.telegram.recipients.length) return Promise.resolve();
+        var photos = Array.isArray(photosArr) ? photosArr : [];
+
+        var tasks = state.telegram.recipients.map(function(r) {
+          var sendTxtPromise = fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: r.chatId, text: msgText, parse_mode: 'Markdown' })
+          }).catch(function() {
+            return fetch('https://api.telegram.org/bot' + tok + '/sendMessage?chat_id=' + encodeURIComponent(r.chatId) + '&text=' + encodeURIComponent(msgText), { mode: 'no-cors' }).catch(function() {});
+          });
+
+          if (!photos.length) return sendTxtPromise;
+
+          return sendTxtPromise.then(function() {
+            var photoPromises = photos.map(function(dataUrl, idx) {
+              var blob = dataURLtoBlob(dataUrl);
+              if (!blob) return Promise.resolve();
+              var fd = new FormData();
+              fd.append('chat_id', r.chatId);
+              fd.append('photo', blob, 'photo_' + (idx + 1) + '.jpg');
+              fd.append('caption', '📷 صورة مرفقة #' + (idx + 1));
+              return fetch('https://api.telegram.org/bot' + tok + '/sendPhoto', {
+                method: 'POST',
+                body: fd
+              }).catch(function() {});
+            });
+            return Promise.all(photoPromises);
+          });
+        });
+        return Promise.all(tasks);
+      }
+
+      // --- Multi-Fallback Telegram Sender ---
+      function sendTelegramAlert(issue) {
         var sev = issue.severity === 'red' ? '🔴 كود أحمر (عطل حرج)' : '🟡 كود أصفر (ملاحظة تحتاج متابعة)';
         var msg = '🏭 *صيانة عامة - مصنع الغسالة الحوضين (FRESH)*\n' +
+                  '🚨 *بلاغ مشكلة / مرور يومي*\n' +
                   sev + '\n' +
                   '⚙️ *الماكينة:* `' + issue.machineCode + '` (' + fmtLine(issue.machineLine) + ')\n' +
                   '👷 *المبلّغ:* ' + issue.reporter + '\n' +
                   '📝 *المشكلة:* ' + issue.notes;
+        return sendTelegramPayload(msg, issue.photos);
+      }
 
-        var tasks = state.telegram.recipients.map(function(r) {
-          return fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: r.chatId, text: msg, parse_mode: 'Markdown' })
-          }).catch(function() {
-            return fetch('https://api.telegram.org/bot' + tok + '/sendMessage?chat_id=' + encodeURIComponent(r.chatId) + '&text=' + encodeURIComponent(msg), { mode: 'no-cors' }).catch(function() {});
-          });
-        });
-        return Promise.all(tasks);
+      function sendTelegramPmReport(logObj) {
+        var procsSummary = (logObj.processes || []).map(function(p, idx) {
+          var tList = (p.techs || []).map(function(t) {
+            return typeof t === 'string' ? t : (t.name + ' - ' + t.specialty);
+          }).join('، ');
+          return (idx + 1) + '. ' + p.task + ' (' + p.minutes + ' د) — [' + tList + ']';
+        }).join('\n');
+
+        var msg = '🏭 *صيانة عامة - مصنع الغسالة الحوضين (FRESH)*\n' +
+                  '🔧 *تقرير صيانة دورية معتمد*\n' +
+                  '⚙️ *الماكينة:* `' + logObj.machineCode + '` (' + fmtLine(logObj.machineLine) + ')\n' +
+                  '📋 *النوع:* ' + logObj.interval + '\n' +
+                  '👔 *المشرف:* ' + logObj.supervisor + '\n' +
+                  '📅 *التاريخ:* ' + logObj.date + ' | ⏱️ *الإجمالي:* ' + logObj.totalMinutes + ' دقيقة\n' +
+                  '🛠️ *البنود المنفذة:*\n' + procsSummary;
+        return sendTelegramPayload(msg, logObj.photos);
       }
 
       // --- Tab 3: Protected Reports & Alert Management ---
@@ -2540,7 +2611,7 @@
           var mObj = state.machines.find(function(m) { return String(m.code) === String(code); }) || { code: code, line: 'غير محدد' };
           var dStr = document.getElementById('pm-date-inp').value || todayISO();
 
-          state.logs.unshift({
+          var newPmLog = {
             id: 'PM-' + Math.floor(1000 + Math.random() * 9000),
             date: dStr,
             timestamp: new Date().toISOString(),
@@ -2551,8 +2622,10 @@
             totalMinutes: tot,
             photos: state.pmPendingPhotos.slice(),
             processes: procs
-          });
+          };
+          state.logs.unshift(newPmLog);
           saveAll(); syncAllToCloud(true);
+          sendTelegramPmReport(newPmLog);
 
           e.target.reset();
           document.getElementById('pm-date-inp').value = todayISO();
@@ -2565,7 +2638,7 @@
           addProcRow();
           renderPmMachines();
           renderPmSups();
-          toast('تم حفظ واعتماد تقرير الصيانة الدورية بنجاح 💾', 'success');
+          toast('تم حفظ التقرير وإرسال إشعار تليجرام بنجاح 💾✈️', 'success');
         });
 
         document.getElementById('patrol-form').addEventListener('submit', function(e) {
